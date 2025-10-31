@@ -1,0 +1,21 @@
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/nav_history"
+        android:icon="@drawable/history"
+        android:title="@string/history5" />
+
+    <item
+        android:id="@+id/nav_favorite"
+        android:icon="@drawable/favorite"
+        android:title="@string/favorite4" />
+
+    <item
+        android:id="@+id/nav_share"
+        android:icon="@drawable/share"
+        android:title="@string/share_app4" />
+
+    <item
+        android:id="@+id/nav_settings"
+        android:icon="@drawable/settings"
+        android:title="@string/settings3" />
+</menu>
