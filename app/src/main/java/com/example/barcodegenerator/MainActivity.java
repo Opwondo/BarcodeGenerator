@@ -1,6 +1,7 @@
 package com.example.barcodegenerator;
 
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.ImageButton;
@@ -19,11 +20,24 @@ public class MainActivity extends AppCompatActivity {
     private DrawerLayout drawerLayout;
     private NavigationView navigationView;
     private ImageButton menuButton;
-
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // Check if user is logged in - if not, redirect to LoginActivity
+        SharedPreferences sharedPreferences = getSharedPreferences("user_prefs", MODE_PRIVATE);
+        boolean isLoggedIn = sharedPreferences.getBoolean("is_logged_in", false);
+
+        if (!isLoggedIn) {
+            Intent intent = new Intent(MainActivity.this, LoginActivity.class);
+            startActivity(intent);
+            finish();
+            return; // Important: prevent further execution
+        }
+
+        // Rest of your existing code...
         setContentView(R.layout.activity_main);
+        // ... continue with the rest of your onCreate method}
 
         // Initialize views
         drawerLayout = findViewById(R.id.drawer_layout);

@@ -42,8 +42,10 @@ public class LoginActivity extends AppCompatActivity {
 
         Log.d("LoginActivity", "Views initialized");
 
-        // Check if user is already logged in
-        checkExistingLogin();
+        // REMOVED: checkExistingLogin() - User must always login
+
+        // Clear any previous login state when activity starts
+        clearLoginState();
 
         // Login button click listener
         loginButton.setOnClickListener(new View.OnClickListener() {
@@ -77,14 +79,14 @@ public class LoginActivity extends AppCompatActivity {
         Log.d("LoginActivity", "All listeners set");
     }
 
-    private void checkExistingLogin() {
-        boolean isLoggedIn = sharedPreferences.getBoolean("is_logged_in", false);
-        if (isLoggedIn) {
-            // User is already logged in, go to main activity
-            Intent intent = new Intent(LoginActivity.this, MainActivity.class);
-            startActivity(intent);
-            finish();
-        }
+    private void clearLoginState() {
+        // Clear any saved login state to force fresh login
+        SharedPreferences.Editor editor = sharedPreferences.edit();
+        editor.putBoolean("is_logged_in", false);
+        editor.remove("user_email");
+        editor.remove("user_name");
+        editor.remove("user_id");
+        editor.apply();
     }
 
     private void attemptLogin() {
