@@ -300,8 +300,6 @@ public class BarcodeScannerActivity extends AppCompatActivity {
         }
     }
 
-    // ============ REST OF THE CODE (Camera scanning - unchanged) ============
-
     private void startCamera() {
         cameraProviderFuture = ProcessCameraProvider.getInstance(this);
         cameraProviderFuture.addListener(() -> {
@@ -415,21 +413,17 @@ public class BarcodeScannerActivity extends AppCompatActivity {
                 return;
             }
 
-            try {
+            try (image) {
                 Bitmap bitmap = image.toBitmap();
-                if (bitmap != null) {
-                    Result result = detectBarcodeWithRotation(bitmap);
-                    if (result != null) {
-                        lastScanTime = currentTime;
-                        String barcodeValue = result.getText();
-                        String format = result.getBarcodeFormat().toString();
-                        runOnUiThread(() -> handleBarcodeResult(barcodeValue, format));
-                    }
+                Result result = detectBarcodeWithRotation(bitmap);
+                if (result != null) {
+                    lastScanTime = currentTime;
+                    String barcodeValue = result.getText();
+                    String format = result.getBarcodeFormat().toString();
+                    runOnUiThread(() -> handleBarcodeResult(barcodeValue, format));
                 }
             } catch (Exception e) {
                 Log.e("BarcodeScanner", "Analysis error", e);
-            } finally {
-                image.close();
             }
         }
 

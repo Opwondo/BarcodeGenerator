@@ -2,6 +2,8 @@ package com.example.barcodegenerator;
 
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.ImageButton;
@@ -20,6 +22,7 @@ public class MainActivity extends AppCompatActivity {
     private DrawerLayout drawerLayout;
     private NavigationView navigationView;
     private ImageButton menuButton;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -66,8 +69,9 @@ public class MainActivity extends AppCompatActivity {
                 favoritesIntent.putExtra("SHOW_FAVORITES", true);
                 startActivity(favoritesIntent);
             } else if (id == R.id.nav_share) {
-                Toast.makeText(MainActivity.this, "Share App clicked", Toast.LENGTH_SHORT).show();
-            }  else if (id == R.id.nav_settings) {
+                // ✅ IMPLEMENTED: Share the App functionality
+                shareApp();
+            } else if (id == R.id.nav_settings) {
                 Toast.makeText(MainActivity.this, "Settings clicked", Toast.LENGTH_SHORT).show();
             }
 
@@ -129,7 +133,7 @@ public class MainActivity extends AppCompatActivity {
         // Barcode format items click listeners
         setupBarcodeFormatClickListeners();
 
-        // MODERN BACK PRESS HANDLING - Add this at the end of onCreate
+        // MODERN BACK PRESS HANDLING
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override
             public void handleOnBackPressed() {
@@ -144,7 +148,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void setupBarcodeFormatClickListeners() {
-        // These IDs need to match your XML - add them to your barcode format TextViews
         int[] barcodeFormatIds = {
                 R.id.ean13_text, R.id.code128_text, R.id.code39_text,
                 R.id.ean8_text, R.id.upca_text, R.id.codabar_text,
@@ -160,7 +163,8 @@ public class MainActivity extends AppCompatActivity {
                         if (v instanceof TextView) {
                             TextView textView = (TextView) v;
                             String formatName = textView.getText().toString();
-                            Toast.makeText(MainActivity.this, formatName + " selected", Toast.LENGTH_SHORT).show();
+
+                            openBarcodeCreation(formatName);
                         }
                     }
                 });
@@ -168,6 +172,109 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // REMOVE the deprecated onBackPressed() method completely
-    // Delete everything below this comment
+    /**
+     Share the App functionality
+     */
+    private void shareApp() {
+        try {
+            // Get app name from resources
+            String appName = getString(R.string.app_name);
+
+            // Get package name (for Play Store link)
+            String packageName = getPackageName();
+
+            // Create share message
+            String shareMessage = "Check out " + appName + " - The Ultimate Barcode Scanner & Generator!\n\n";
+            shareMessage += "Scan any barcode or QR code instantly\n";
+            shareMessage += "Generate custom barcodes and QR codes\n";
+            shareMessage += "Perfect for inventory, shopping, and more!\n\n";
+            shareMessage += "Download it from the Play Store:\n";
+            shareMessage += "https://play.google.com/store/apps/details?id=" + packageName;
+
+            // Create share intent
+            Intent shareIntent = new Intent(Intent.ACTION_SEND);
+            shareIntent.setType("text/plain");
+            shareIntent.putExtra(Intent.EXTRA_SUBJECT, "Check out " + appName);
+            shareIntent.putExtra(Intent.EXTRA_TEXT, shareMessage);
+
+            // Launch share dialog
+            startActivity(Intent.createChooser(shareIntent, "Share " + appName));
+
+        } catch (Exception e) {
+            Toast.makeText(this, "Error sharing app: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /**
+     *  Open barcode creation with selected format
+     */
+    private void openBarcodeCreation(String formatName) {
+        // Show toast confirmation
+        Toast.makeText(this, "Creating " + formatName + " barcode", Toast.LENGTH_SHORT).show();
+
+        // Navigate to CreateBarcodeActivity with the selected format
+        Intent intent = new Intent(MainActivity.this, CreateBarcodeActivity.class);
+        intent.putExtra("SELECTED_FORMAT", formatName);
+        startActivity(intent);
+    }
+
+    /**
+     Share content from the app
+     */
+    public static void shareContent(android.content.Context context, String content, String title) {
+        try {
+            Intent shareIntent = new Intent(Intent.ACTION_SEND);
+            shareIntent.setType("text/plain");
+            shareIntent.putExtra(Intent.EXTRA_SUBJECT, title);
+            shareIntent.putExtra(Intent.EXTRA_TEXT, content);
+
+            context.startActivity(Intent.createChooser(shareIntent, "Share via"));
+        } catch (Exception e) {
+            Toast.makeText(context, "Error sharing content", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /**
+     *Rate the app functionality
+     */
+    private void rateApp() {
+        try {
+            String packageName = getPackageName();
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setData(Uri.parse("market://details?id=" + packageName));
+            startActivity(intent);
+        } catch (Exception e) {
+            // If Play Store not available, open browser
+            String packageName = getPackageName();
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setData(Uri.parse("https://play.google.com/store/apps/details?id=" + packageName));
+            startActivity(intent);
+        }
+    }
+
+    /**
+     * Feedback functionality
+     */
+    private void sendFeedback() {
+        try {
+            String appName = getString(R.string.app_name);
+            String versionName = "";
+
+            try {
+                versionName = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+            } catch (PackageManager.NameNotFoundException e) {
+                versionName = "Unknown";
+            }
+
+            Intent emailIntent = new Intent(Intent.ACTION_SENDTO);
+            emailIntent.setData(Uri.parse("mailto:"));
+            emailIntent.putExtra(Intent.EXTRA_EMAIL, new String[]{"support@yourapp.com"}); // Replace with your support email
+            emailIntent.putExtra(Intent.EXTRA_SUBJECT, appName + " Feedback - v" + versionName);
+            emailIntent.putExtra(Intent.EXTRA_TEXT, "Hi Team,\n\nI would like to share some feedback about " + appName + ":\n\n");
+
+            startActivity(Intent.createChooser(emailIntent, "Send feedback via"));
+        } catch (Exception e) {
+            Toast.makeText(this, "No email app found", Toast.LENGTH_SHORT).show();
+        }
+    }
 }
