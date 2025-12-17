@@ -72,7 +72,9 @@ public class MainActivity extends AppCompatActivity {
                 // ✅ IMPLEMENTED: Share the App functionality
                 shareApp();
             } else if (id == R.id.nav_settings) {
-                Toast.makeText(MainActivity.this, "Settings clicked", Toast.LENGTH_SHORT).show();
+                // ✅ UPDATED: Open Settings Activity
+                Intent settingsIntent = new Intent(MainActivity.this, SettingsActivity.class);
+                startActivity(settingsIntent);
             }
 
             // Close drawer after selection

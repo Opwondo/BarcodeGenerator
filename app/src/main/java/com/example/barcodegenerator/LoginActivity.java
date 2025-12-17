@@ -132,9 +132,12 @@ public class LoginActivity extends AppCompatActivity {
     private void saveLoginState(User user) {
         SharedPreferences.Editor editor = sharedPreferences.edit();
         editor.putBoolean("is_logged_in", true);
+        // ✅ UPDATED: Save user name and email
         editor.putString("user_email", user.getEmail());
         editor.putString("user_name", user.getFullName());
         editor.putInt("user_id", user.getId());
         editor.apply();
+
+        Log.d("LoginActivity", "User data saved: " + user.getFullName() + ", " + user.getEmail());
     }
 }
