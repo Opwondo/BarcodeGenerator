@@ -1,12 +1,16 @@
 package com.example.barcodegenerator;
 
 import android.Manifest;
+import android.app.ProgressDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Matrix;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Vibrator;
+import android.provider.MediaStore;
 import android.util.Log;
 import android.util.Size;
 import android.view.View;
@@ -15,6 +19,7 @@ import android.widget.ImageView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.camera.core.Camera;
 import androidx.camera.core.CameraSelector;
@@ -23,6 +28,7 @@ import androidx.camera.core.ImageProxy;
 import androidx.camera.core.Preview;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.camera.view.PreviewView;
+import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
 import com.google.common.util.concurrent.ListenableFuture;
@@ -35,6 +41,7 @@ import com.google.zxing.Result;
 import com.google.zxing.common.HybridBinarizer;
 import com.google.zxing.BarcodeFormat;
 
+import java.io.InputStream;
 import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.Map;
@@ -59,6 +66,11 @@ public class BarcodeScannerActivity extends AppCompatActivity {
     private ImageAnalysis imageAnalysis;
     private boolean isScanning = true;
 
+    // Constants for permissions and requests
+    private static final int STORAGE_PERMISSION_CODE = 101;
+    private static final int PICK_IMAGE_REQUEST = 102;
+    private static final int CAMERA_PERMISSION_REQUEST_CODE = 100;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -70,7 +82,7 @@ public class BarcodeScannerActivity extends AppCompatActivity {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             startCamera();
         } else {
-            requestPermissions(new String[]{Manifest.permission.CAMERA}, 100);
+            requestPermissions(new String[]{Manifest.permission.CAMERA}, CAMERA_PERMISSION_REQUEST_CODE);
         }
 
         cameraExecutor = Executors.newSingleThreadExecutor();
@@ -89,9 +101,7 @@ public class BarcodeScannerActivity extends AppCompatActivity {
     private void setupClickListeners() {
         backButton.setOnClickListener(v -> finish());
 
-        scanImageLayout.setOnClickListener(v -> {
-            Toast.makeText(this, "Scan from image - Coming soon", Toast.LENGTH_SHORT).show();
-        });
+        scanImageLayout.setOnClickListener(v -> openImagePicker());
 
         flashlightLayout.setOnClickListener(v -> toggleFlashlight());
 
@@ -99,6 +109,198 @@ public class BarcodeScannerActivity extends AppCompatActivity {
             Toast.makeText(this, "Batch scan mode", Toast.LENGTH_SHORT).show();
         });
     }
+
+    private void openImagePicker() {
+        // Check storage permission
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED) {
+
+            // Request permission
+            ActivityCompat.requestPermissions(this,
+                    new String[]{Manifest.permission.READ_EXTERNAL_STORAGE},
+                    STORAGE_PERMISSION_CODE);
+        } else {
+            // Permission already granted, launch image picker
+            launchImagePicker();
+        }
+    }
+
+    private void launchImagePicker() {
+        try {
+            Intent intent = new Intent(Intent.ACTION_PICK);
+            intent.setType("image/*");
+            intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"image/jpeg", "image/png", "image/jpg"});
+
+            startActivityForResult(Intent.createChooser(intent, "Select Picture"), PICK_IMAGE_REQUEST);
+        } catch (Exception ex) {
+            Toast.makeText(this, "No image picker app found", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+
+        if (requestCode == PICK_IMAGE_REQUEST && resultCode == RESULT_OK && data != null) {
+            Uri imageUri = data.getData();
+            if (imageUri != null) {
+                processSelectedImage(imageUri);
+            }
+        }
+    }
+
+    private void processSelectedImage(Uri imageUri) {
+        try {
+            // Show loading dialog
+            ProgressDialog progressDialog = new ProgressDialog(this);
+            progressDialog.setMessage("Scanning image...");
+            progressDialog.setCancelable(false);
+            progressDialog.show();
+
+            // Decode image from URI
+            InputStream inputStream = getContentResolver().openInputStream(imageUri);
+            Bitmap bitmap = BitmapFactory.decodeStream(inputStream);
+
+            if (bitmap != null) {
+                // Process in background thread
+                new Thread(() -> {
+                    String barcodeResult = detectBarcodeFromBitmap(bitmap);
+
+                    runOnUiThread(() -> {
+                        progressDialog.dismiss();
+
+                        if (barcodeResult != null && !barcodeResult.isEmpty()) {
+                            // Barcode found
+                            handleScanFromImageResult(barcodeResult, "IMAGE_SCAN");
+                        } else {
+                            // No barcode found
+                            Toast.makeText(this, "No barcode found in the image", Toast.LENGTH_LONG).show();
+                        }
+                    });
+                }).start();
+
+                if (inputStream != null) {
+                    inputStream.close();
+                }
+            } else {
+                progressDialog.dismiss();
+                Toast.makeText(this, "Failed to load image", Toast.LENGTH_SHORT).show();
+            }
+
+        } catch (Exception e) {
+            Log.e("ScanImage", "Error processing image", e);
+            Toast.makeText(this, "Error processing image", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private String detectBarcodeFromBitmap(Bitmap bitmap) {
+        try {
+            // Try all rotations (0, 90, 180, 270 degrees)
+            for (int rotation : new int[]{0, 90, 180, 270}) {
+                try {
+                    Bitmap rotatedBitmap = rotateBitmap(bitmap, rotation);
+                    if (rotatedBitmap == null) continue;
+
+                    int width = rotatedBitmap.getWidth();
+                    int height = rotatedBitmap.getHeight();
+                    int[] pixels = new int[width * height];
+                    rotatedBitmap.getPixels(pixels, 0, width, 0, 0, width, height);
+
+                    RGBLuminanceSource source = new RGBLuminanceSource(width, height, pixels);
+                    BinaryBitmap binaryBitmap = new BinaryBitmap(new HybridBinarizer(source));
+
+                    // Configure reader
+                    MultiFormatReader reader = new MultiFormatReader();
+                    Map<DecodeHintType, Object> hints = new EnumMap<>(DecodeHintType.class);
+                    hints.put(DecodeHintType.TRY_HARDER, Boolean.TRUE);
+                    hints.put(DecodeHintType.POSSIBLE_FORMATS,
+                            EnumSet.of(
+                                    BarcodeFormat.UPC_A,
+                                    BarcodeFormat.UPC_E,
+                                    BarcodeFormat.EAN_13,
+                                    BarcodeFormat.EAN_8,
+                                    BarcodeFormat.CODE_128,
+                                    BarcodeFormat.CODE_39,
+                                    BarcodeFormat.CODE_93,
+                                    BarcodeFormat.CODABAR,
+                                    BarcodeFormat.ITF,
+                                    BarcodeFormat.QR_CODE,
+                                    BarcodeFormat.DATA_MATRIX,
+                                    BarcodeFormat.PDF_417
+                            ));
+                    reader.setHints(hints);
+
+                    Result result = reader.decodeWithState(binaryBitmap);
+
+                    if (result != null) {
+                        return result.getText();
+                    }
+
+                } catch (Exception e) {
+                    // Continue with next rotation
+                    continue;
+                }
+            }
+
+        } catch (Exception e) {
+            Log.e("ScanImage", "Error scanning image", e);
+        }
+
+        return null;
+    }
+
+    private Bitmap rotateBitmap(Bitmap bitmap, int degrees) {
+        if (degrees != 0 && bitmap != null) {
+            Matrix matrix = new Matrix();
+            matrix.postRotate(degrees);
+            return Bitmap.createBitmap(bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), matrix, true);
+        }
+        return bitmap;
+    }
+
+    private void handleScanFromImageResult(String barcodeValue, String format) {
+        // Vibrate on detection
+        Vibrator vibrator = (Vibrator) getSystemService(VIBRATOR_SERVICE);
+        if (vibrator != null && vibrator.hasVibrator()) {
+            vibrator.vibrate(100);
+        }
+
+        // Save to history
+        saveToHistory(barcodeValue, format);
+
+        Log.d("ScanImage", "Barcode detected from image: " + barcodeValue);
+
+        // Navigate to Results Activity
+        Intent intent = new Intent(this, ScanResultActivity.class);
+        intent.putExtra("SCANNED_BARCODE", barcodeValue.trim());
+        intent.putExtra("BARCODE_FORMAT", format);
+        startActivity(intent);
+        finish();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+
+        if (requestCode == CAMERA_PERMISSION_REQUEST_CODE) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                startCamera();
+            } else {
+                Toast.makeText(this, "Camera permission required", Toast.LENGTH_SHORT).show();
+                finish();
+            }
+        }
+
+        if (requestCode == STORAGE_PERMISSION_CODE) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                launchImagePicker();
+            } else {
+                Toast.makeText(this, "Storage permission required to pick images", Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
+
+    // ============ REST OF THE CODE (Camera scanning - unchanged) ============
 
     private void startCamera() {
         cameraProviderFuture = ProcessCameraProvider.getInstance(this);
@@ -119,15 +321,14 @@ public class BarcodeScannerActivity extends AppCompatActivity {
                 .build();
 
         Preview preview = new Preview.Builder()
-                .setTargetResolution(new Size(1920, 1080)) // Higher resolution for better detection
+                .setTargetResolution(new Size(1920, 1080))
                 .build();
         preview.setSurfaceProvider(previewView.getSurfaceProvider());
 
-        // Optimize ImageAnalysis
         imageAnalysis = new ImageAnalysis.Builder()
-                .setTargetResolution(new Size(1280, 720)) // Balanced resolution
+                .setTargetResolution(new Size(1280, 720))
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888) // Easier processing
+                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                 .build();
 
         imageAnalysis.setAnalyzer(cameraExecutor, new BarcodeAnalyzer());
@@ -154,7 +355,6 @@ public class BarcodeScannerActivity extends AppCompatActivity {
         }
     }
 
-    // ADD THIS NEW METHOD TO SAVE TO HISTORY
     private void saveToHistory(String barcodeValue, String format) {
         try {
             HistoryManager.getInstance(this).saveScan(barcodeValue, format);
@@ -167,14 +367,13 @@ public class BarcodeScannerActivity extends AppCompatActivity {
     private class BarcodeAnalyzer implements ImageAnalysis.Analyzer {
         private final MultiFormatReader reader;
         private long lastScanTime = 0;
-        private static final long SCAN_COOLDOWN = 1000; // 1 second between scans
+        private static final long SCAN_COOLDOWN = 1000;
         private int frameCount = 0;
         private long startTime = System.currentTimeMillis();
 
         public BarcodeAnalyzer() {
             reader = new MultiFormatReader();
 
-            // Include all common barcode formats
             Map<DecodeHintType, Object> hints = new EnumMap<>(DecodeHintType.class);
             hints.put(DecodeHintType.TRY_HARDER, Boolean.TRUE);
             hints.put(DecodeHintType.POSSIBLE_FORMATS,
@@ -202,7 +401,6 @@ public class BarcodeScannerActivity extends AppCompatActivity {
                 return;
             }
 
-            // Performance monitoring
             frameCount++;
             if (frameCount % 30 == 0) {
                 long currentTime = System.currentTimeMillis();
@@ -211,7 +409,6 @@ public class BarcodeScannerActivity extends AppCompatActivity {
                 startTime = currentTime;
             }
 
-            // Add cooldown to prevent excessive scanning
             long currentTime = System.currentTimeMillis();
             if (currentTime - lastScanTime < SCAN_COOLDOWN) {
                 image.close();
@@ -219,8 +416,7 @@ public class BarcodeScannerActivity extends AppCompatActivity {
             }
 
             try {
-                // Process image directly using efficient conversion
-                Bitmap bitmap = imageToBitmap(image);
+                Bitmap bitmap = image.toBitmap();
                 if (bitmap != null) {
                     Result result = detectBarcodeWithRotation(bitmap);
                     if (result != null) {
@@ -237,32 +433,10 @@ public class BarcodeScannerActivity extends AppCompatActivity {
             }
         }
 
-        private Bitmap imageToBitmap(ImageProxy image) {
-            // Efficient conversion using ImageProxy's built-in method
-            try {
-                return image.toBitmap();
-            } catch (Exception e) {
-                Log.e("BarcodeScanner", "Bitmap conversion failed", e);
-                return null;
-            }
-        }
-
-        private Bitmap rotateBitmap(Bitmap bitmap, int degrees) {
-            if (degrees != 0 && bitmap != null) {
-                Matrix matrix = new Matrix();
-                matrix.postRotate(degrees);
-                return Bitmap.createBitmap(bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), matrix, true);
-            }
-            return bitmap;
-        }
-
         private Result detectBarcodeWithRotation(Bitmap bitmap) {
-            // Try original orientation first (fastest)
             Result result = scanSingleOrientation(bitmap, 0);
             if (result != null) return result;
 
-            // If no barcode found, try other orientations (slower but more thorough)
-            // Barcodes often need to be horizontal to be detected
             int[] rotations = {90, 180, 270};
             for (int rotation : rotations) {
                 result = scanSingleOrientation(bitmap, rotation);
@@ -288,8 +462,17 @@ public class BarcodeScannerActivity extends AppCompatActivity {
                 return reader.decodeWithState(binaryBitmap);
 
             } catch (Exception e) {
-                return null; // No barcode found in this orientation
+                return null;
             }
+        }
+
+        private Bitmap rotateBitmap(Bitmap bitmap, int degrees) {
+            if (degrees != 0 && bitmap != null) {
+                Matrix matrix = new Matrix();
+                matrix.postRotate(degrees);
+                return Bitmap.createBitmap(bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), matrix, true);
+            }
+            return bitmap;
         }
     }
 
@@ -297,46 +480,27 @@ public class BarcodeScannerActivity extends AppCompatActivity {
         if (!isScanning) return;
         isScanning = false;
 
-        // Validate barcode content
         if (barcodeValue == null || barcodeValue.trim().isEmpty()) {
             Log.e("BarcodeScanner", "Empty barcode detected");
-            isScanning = true; // Resume scanning
+            isScanning = true;
             return;
         }
 
-        // Clean the barcode value
         String cleanBarcode = barcodeValue.trim();
-
         Log.d("BarcodeScanner", "Barcode detected: " + cleanBarcode + " Format: " + format);
 
-        // ✅ ADD THIS LINE: Save to history before navigating
         saveToHistory(cleanBarcode, format);
 
-        // Vibrate on detection
         Vibrator vibrator = (Vibrator) getSystemService(VIBRATOR_SERVICE);
         if (vibrator != null && vibrator.hasVibrator()) {
             vibrator.vibrate(100);
         }
 
-        // Navigate to Results Activity
         Intent intent = new Intent(this, ScanResultActivity.class);
         intent.putExtra("SCANNED_BARCODE", cleanBarcode);
         intent.putExtra("BARCODE_FORMAT", format);
         startActivity(intent);
         finish();
-    }
-
-    @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == 100) {
-            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                startCamera();
-            } else {
-                Toast.makeText(this, "Camera permission required", Toast.LENGTH_SHORT).show();
-                finish();
-            }
-        }
     }
 
     @Override
